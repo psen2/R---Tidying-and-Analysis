@@ -1,0 +1,194 @@
+---
+title: "Assignment1_SEN_LPR2018data_public"
+date: "1/14/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,message=FALSE, warning=FALSE)
+
+```
+
+## Living Planet Index Report Tidying and Analysis
+### Source: 
+For this assignment, I have used dataset obtained from the website [Living Planet Index](http://www.livingplanetindex.org/projects?main_page_project=LivingPlanetReport&home_flag=1). 
+
+### Background and Charateristics of the Dataset
+The Living Planet is a comprehensive study of trends in global biodiversity and the health of the planet based on population trends of vertebrate species from terrestrial, freshwater and marine habitats.The period covered by this report is from 1950 to 2016 and has data for over 2805 unique species belonging to  11 different classes. In addition to the population data, each time series is assigned to a system–terrestrial, freshwater and marine–based on both the location of the monitored population and the habitat the species mostly relies on. Analysis has been done for the complete dataset with focus on the African region.
+
+### Variables
+Below is the list of variable available in this dataset.  
+1. **ID**:	Unique identifier  
+2. **Binomial**:	Binomial Nomenclature i.e. the formal naming system of living things used by scientists  
+3. **Reference**:	Reference for the binomial  
+4. **Class**:	Contains 8 different Animal Kingdom classes  
+5. **Order**:	Taxonomic rank used for classification of organisms and recognized by the nomenclature codes  
+6. **Family**: Taxonomic rank, classified between genus and order  
+7. **Genus**: 	Taxonomic rank for bilogical classification, comes above species and below family  
+8. **Species**:	Basic unit of classification and a taxonomic rank of an organism, as well as a unit of biodiversity  
+9. **Subspecies**:	a taxonomic category that ranks below species, usually a fairly permanent geographically isolated race  
+10. **Common_name**:	name commonly used by general public to refer to a particular species  
+11. **Location**:	exact location of the species  
+12. **Country**:	Country where the species is found  
+13. **All_countries**:	List of countries where the species is found  
+14. **Region**:	Region where the species is found  
+15. **Latitude**:	Latitude of the location  
+16. **Longitude**:	Longitude of the location  
+17. **Specific_location**:	value is 0 or 1  
+18. **temperate_or_tropical**:	temperate has value 1 and tropical has value 2  
+19. **System**:	provides information if the system is terrestial,marine or freshwater  
+20. **T_realm**:	terrestial realm data  
+21. **T_biome**:	terrestial biome data  
+22. **FW_realm**:	freshwater realm data  
+23. **FW_biome**:	freshwater biome data  
+24. **M_realm**:	marine realm data  
+25. **M_ocean**:	marine ocean data  
+26. **M_biome**:	marine biome data  
+27. **Units**:	units of measurement of population  
+28. **Method**:	method of sampling  
+29-95. **1950-2016**:	Years for which data is available  
+
+### Data Wrangling: Tidy Principle
+There are 3 Tidy Principles.  
+1. Each variable must have its own column.  
+2. Each observation must have its own row.  
+3. Each value must have its own cell.    
+
+This dataset breaks the second one - Within the table, each year is a separate column. Since each observation must have its own row, I consolidated them into a single year column using "Gather" from tidyr package. I also used dplyr package to do some data manipulation. For plotting I have used packages ggplot, ggthemes,rworldmap 
+
+## Code  
+
+```{r cars}
+#install.packages("tidyverse")
+library("tidyverse")
+
+
+LPI_df <- read_csv(file = "Assignment1-SEN-LPR2018data_public.csv")
+LPI_df <- gather(data = LPI_df, key = year, value = population, "1950":"2016")
+
+#remove all rows which have no  population
+LPI_df <- filter(LPI_df, population != "NULL")
+
+# check the datatype for population and year
+class(LPI_df$population)
+class(LPI_df$year)
+
+# convert year and estimated population into numbers
+LPI_df$year <- as.numeric(as.character(LPI_df$year))
+LPI_df$population <- as.numeric(as.character(LPI_df$population))
+
+
+# Keep ids with atleast 5 data points 
+LPI_df <- LPI_df %>% 
+	group_by(ID) %>% 
+	filter(length(unique(year)) > 4)
+
+# feature scaling to have data between 0 and 1
+LPI_df <- LPI_df %>% 
+	group_by(ID) %>% 
+	mutate(pop_scale = (population - min(population))/(max(population)-min(population)))
+
+# Find unique regions
+unique(LPI_df$Region)
+# filter data for a specific region
+Africa_df <- filter(LPI_df, Region == "Africa")
+
+# Create dataframe for Africa without the columns mentioned in Select list
+Africa_df <- Africa_df %>%
+  select(-c("Reference","Subspecies","All_countries","Specific_location","Units","Method"))%>%
+  filter(population>=1) %>%
+  arrange(year)
+
+# Create a new column genus_species_id that will contain genus,species and id to give unique species information
+Africa_df$genus_species_id <- paste(Africa_df$Genus, 
+                                    Africa_df$Species, 
+                                    Africa_df$ID, sep = "_")
+
+# Further tidy the data by removing duplicates keep data for id's with atleast lengthyear greater than 5
+Africa_df <- distinct(Africa_df) %>%
+  group_by(genus_species_id) %>%  # rows are grouped so that each group is one population
+  mutate(lengthyear = max(year)- min(year)) %>%  # column created for the first and most recent years that data was collected
+  filter(lengthyear>5)
+
+# summarise the data and calculating the mean length year for each class of species
+Africa_df_summ <- Africa_df %>%
+  group_by(Class) %>%
+  summarise(population = n(), 
+            avg_lengthyear = mean(lengthyear))
+
+
+```
+
+## Plots
+
+
+```{r pressure, message=FALSE, warning=FALSE}
+#install.packages("ggthemes")
+library("ggthemes")
+#install.packages("ggplot2")
+library("ggplot2")
+#install.packages("rworldmap")
+library("rworldmap")
+
+# Time series Histogram for Population growth for different regions where Order is Charadriiformes and year is greater than 1990. We can see most species of order Charadriiformes were available in Europe but the numbers have declines since 2000 to almost null in present day.
+
+(hist_plot<- LPI_df %>% 
+  filter(Order=="Charadriiformes" & year >= 1990)%>%
+  ggplot(aes(x=year, y = population, fill = Region)) + 
+  geom_bar(stat="identity")+
+  scale_fill_brewer(palette = "Blues")+
+  theme_economist()+
+  labs(title="Histogram of Year Vs Population", 
+       subtitle="For Charadriiformes since 1990"))
+
+# The distribution of class of species over African continent can be seen on the map below 
+
+world <- getMap(resolution = "low")
+world_continent <- world[world@data$continent %in% c("Africa"), ]
+
+ggplot() +
+	geom_polygon(data = world_continent, 
+		aes(x = long, y = lat, group = group),
+		fill = NA, colour = "black") + 
+	geom_point(data = Africa_df,  # Adding and plotting class of species data
+		aes(x = Longitude, y = Latitude, 
+			colour = Class)) +
+	coord_quickmap() + 
+	theme_classic() +  # Removes the grey background
+	xlab("Longitude") +
+	ylab("Latitude") + 
+	guides(colour=guide_legend(title="Class"))+
+  labs(title="Plot of Class over map of African continent")
+
+# Plotting time series trend to show population growth over years for Africa Region specifically in Ghana, Ethiopia and Cameroon from year 1990. We can see a steady increase of population these countries
+
+  Africa_df %>% 
+    filter(Country %in% c("Ghana","Ethiopia","Cameroon")& year>=1990 )%>% 
+    ggplot() + 
+    geom_point(aes(x=year, y =population , color=Common_name))+
+    geom_smooth(aes(x=year, y = population))+
+    theme_gdocs()+
+    scale_color_gdocs()
+
+
+# Plotting scaled population over year for United States. We can see that the there was an huge decline after the 1970s but the number is slowly improving post 2000
+ggplot(LPI_df%>%filter(Country=="United States"), aes(x=year,y=pop_scale))+
+  geom_point()+
+  geom_smooth()+
+  labs(title="Year Vs Scaled population")+
+  xlab("Year")+
+  ylab("Scaled population")+
+  theme_wsj()
+
+# Plotting population over mean length year
+ggplot(Africa_df_summ, aes(x=avg_lengthyear, y=population))+
+  geom_line()+
+  labs(title="Population over Mean length-year")+
+  xlab("Mean length-year")+
+  ylab("Population")+
+  theme_economist_white()
+    
+
+```
+
+
